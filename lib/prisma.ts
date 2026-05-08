@@ -3,8 +3,7 @@ import { PrismaClient } from "@prisma/client";
 function createClient(): PrismaClient {
   const url = process.env.DATABASE_URL ?? "";
 
-  if (url.startsWith("file:") || url === "") {
-    // Local SQLite — development only, better-sqlite3 is optional
+  if (!url || url.startsWith("file:")) {
     try {
       const { PrismaBetterSqlite3 } = require("@prisma/adapter-better-sqlite3");
       const path = require("path");
@@ -15,7 +14,7 @@ function createClient(): PrismaClient {
       return new PrismaClient({ adapter } as ConstructorParameters<typeof PrismaClient>[0]);
     } catch {
       throw new Error(
-        "SQLite adapter not available. Set DATABASE_URL to a PostgreSQL connection string or install better-sqlite3."
+        "No DATABASE_URL set and better-sqlite3 is unavailable. Add DATABASE_URL to your environment variables."
       );
     }
   }
@@ -23,14 +22,27 @@ function createClient(): PrismaClient {
   // PostgreSQL — Supabase (strip pgbouncer hint before passing to pg.Pool)
   const { PrismaPg } = require("@prisma/adapter-pg");
   const { Pool } = require("pg");
-  const cleanUrl = url.replace(/[?&]pgbouncer=true/i, "").replace(/[?&]pgbouncer=false/i, "");
+  const cleanUrl = url.replace(/[?&]pgbouncer=(true|false)/gi, "").replace(/[?&]$/, "");
   const pool = new Pool({ connectionString: cleanUrl });
   const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter } as ConstructorParameters<typeof PrismaClient>[0]);
 }
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+// Lazy singleton — createClient() runs on first property access, NOT at module load time.
+// This prevents Vercel build-time failures when DATABASE_URL isn't available during static analysis.
+let _client: PrismaClient | undefined;
 
-export const prisma = globalForPrisma.prisma || createClient();
+function getClient(): PrismaClient {
+  if (!_client) {
+    const g = globalThis as unknown as { prisma?: PrismaClient };
+    _client = g.prisma ?? createClient();
+    if (process.env.NODE_ENV !== "production") g.prisma = _client;
+  }
+  return _client;
+}
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop: string | symbol) {
+    return (getClient() as any)[prop as string];
+  },
+});
