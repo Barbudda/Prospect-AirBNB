@@ -339,6 +339,7 @@ export default function SearchPage() {
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const logIdRef = useRef(0);
+  const didCompleteRef = useRef(false);
 
   const [form, setForm] = useState({
     targetDescription: "",
@@ -373,6 +374,7 @@ export default function SearchPage() {
     setError(null);
     setScrapeRunId(null);
     logIdRef.current = 0;
+    didCompleteRef.current = false;
 
     abortRef.current = new AbortController();
 
@@ -425,16 +427,20 @@ export default function SearchPage() {
             }
 
             if (event.type === "complete") {
+              didCompleteRef.current = true;
               setStage("done");
               if (event.stats) setStats(event.stats);
               if (event.scrapeRunId) {
                 setScrapeRunId(event.scrapeRunId);
-                // Fetch the leads from this run
                 const res = await fetch(`/api/scraper/runs/${event.scrapeRunId}`);
                 if (res.ok) {
                   const data = await res.json();
                   setLeads(data.run?.prospects || []);
+                } else {
+                  setLeads([]);
                 }
+              } else {
+                setLeads([]);
               }
             }
 
@@ -454,7 +460,7 @@ export default function SearchPage() {
       }
     } finally {
       setLoading(false);
-      if (stage !== "done") setStage("idle");
+      if (!didCompleteRef.current) setStage("idle");
     }
   };
 
