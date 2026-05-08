@@ -1,33 +1,46 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import {
   Search,
   Loader2,
   MapPin,
-  Target,
   Globe,
   Mail,
   Phone,
   Instagram,
-  Facebook,
   AlertCircle,
   CheckCircle2,
   ArrowRight,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Zap,
+  TrendingUp,
+  Activity,
 } from "lucide-react";
 import Link from "next/link";
 
-type ProgressEvent = {
-  type: "progress" | "complete" | "error";
-  stage?: string;
-  message?: string;
-  contactsFound?: number;
-  pagesAnalyzed?: number;
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type LogEntry = {
+  id: number;
+  level: "info" | "success" | "warning" | "error";
+  message: string;
 };
 
-type DbProspect = {
+type Stats = {
+  queriesRun: number;
+  urlsFound: number;
+  pagesAnalyzed: number;
+  leadsFound: number;
+  leadsSaved: number;
+  duplicatesSkipped: number;
+  errors: number;
+};
+
+type Lead = {
   id: string;
   name: string;
   city: string;
@@ -36,18 +49,43 @@ type DbProspect = {
   phone: string | null;
   website: string | null;
   instagram: string | null;
-  facebook: string | null;
   priority: string;
   confidence: string;
+  signals: string | null;
+  angle: string | null;
+  nextAction: string | null;
   sourceUrl: string;
 };
 
-const TARGET_TYPES = [
-  { value: "all", label: "All types" },
-  { value: "concierge", label: "Concierge / Property manager" },
-  { value: "host", label: "Airbnb host / Owner" },
-  { value: "property_manager", label: "Property manager" },
+type Stage =
+  | "idle"
+  | "planning"
+  | "searching"
+  | "crawling"
+  | "extracting"
+  | "deduplicating"
+  | "saving"
+  | "done";
+
+const STAGES: Stage[] = [
+  "planning",
+  "searching",
+  "crawling",
+  "extracting",
+  "deduplicating",
+  "saving",
 ];
+
+const STAGE_LABELS: Record<Stage, string> = {
+  idle: "Idle",
+  planning: "Planning",
+  searching: "Searching",
+  crawling: "Crawling",
+  extracting: "Extracting",
+  deduplicating: "Deduplicating",
+  saving: "Saving",
+  done: "Done",
+};
 
 const COUNTRIES = [
   "France",
@@ -57,80 +95,307 @@ const COUNTRIES = [
   "Italy",
   "Portugal",
   "United Kingdom",
+  "Germany",
+  "Netherlands",
+  "United States",
 ];
 
-function PriorityDot({ priority }: { priority: string }) {
+const INDUSTRIES = [
+  { value: "", label: "Auto-detect" },
+  { value: "airbnb", label: "Airbnb / Short-term rental" },
+  { value: "concierge", label: "Concierge / Property management" },
+  { value: "hotel", label: "Hotels & Hospitality" },
+  { value: "restaurant", label: "Restaurants & Cafés" },
+  { value: "real_estate", label: "Real Estate Agency" },
+  { value: "fitness", label: "Fitness / Gym / Wellness" },
+  { value: "dental", label: "Dental / Medical" },
+];
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function StageBar({ stage }: { stage: Stage }) {
+  const activeIdx = STAGES.indexOf(stage);
   return (
-    <span
-      className={`inline-block h-2 w-2 rounded-full ${
-        priority === "high"
-          ? "bg-emerald-500"
-          : priority === "medium"
-          ? "bg-amber-400"
-          : "bg-slate-300 dark:bg-slate-600"
-      }`}
-    />
-  );
-}
-
-function ContactBadges({ prospect }: { prospect: DbProspect }) {
-  const badges = [];
-  if (prospect.email) badges.push({ icon: Mail, label: "Email", color: "text-blue-500" });
-  if (prospect.phone) badges.push({ icon: Phone, label: "Phone", color: "text-emerald-500" });
-  if (prospect.website) badges.push({ icon: Globe, label: "Website", color: "text-slate-400" });
-  if (prospect.instagram) badges.push({ icon: Instagram, label: "Instagram", color: "text-pink-500" });
-  if (prospect.facebook) badges.push({ icon: Facebook, label: "Facebook", color: "text-blue-400" });
-
-  if (badges.length === 0)
-    return <span className="text-xs text-slate-400 dark:text-slate-500">No contact found</span>;
-
-  return (
-    <div className="flex items-center gap-2">
-      {badges.map((b) => (
-        <span key={b.label} title={b.label}><b.icon className={`h-3.5 w-3.5 ${b.color}`} /></span>
-      ))}
+    <div className="flex items-center gap-0">
+      {STAGES.map((s, i) => {
+        const done = activeIdx > i;
+        const active = activeIdx === i;
+        return (
+          <div key={s} className="flex items-center gap-0 flex-1 min-w-0">
+            <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
+              <div
+                className={`h-1.5 w-full rounded-full transition-all duration-500 ${
+                  done
+                    ? "bg-emerald-500"
+                    : active
+                    ? "bg-blue-500 animate-pulse"
+                    : "bg-slate-200 dark:bg-white/10"
+                }`}
+              />
+              <span
+                className={`text-[10px] font-medium hidden sm:block ${
+                  done
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : active
+                    ? "text-blue-600 dark:text-blue-400"
+                    : "text-slate-400 dark:text-slate-500"
+                }`}
+              >
+                {STAGE_LABELS[s]}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  icon: React.ElementType;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="rounded-lg bg-slate-100 p-2 dark:bg-white/10">
+        <Icon className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+      </div>
+      <div>
+        <div className="text-lg font-bold text-slate-900 dark:text-white">{value}</div>
+        <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
+      </div>
+    </div>
+  );
+}
+
+function LogLine({ entry }: { entry: LogEntry }) {
+  const icon =
+    entry.level === "success"
+      ? "✓"
+      : entry.level === "error"
+      ? "✗"
+      : entry.level === "warning"
+      ? "!"
+      : "·";
+  const color =
+    entry.level === "success"
+      ? "text-emerald-500"
+      : entry.level === "error"
+      ? "text-red-400"
+      : entry.level === "warning"
+      ? "text-amber-400"
+      : "text-slate-400 dark:text-slate-500";
+
+  return (
+    <div className="flex items-start gap-2 py-0.5">
+      <span className={`mt-0.5 flex-shrink-0 text-xs font-bold ${color}`}>{icon}</span>
+      <span className="text-xs text-slate-700 dark:text-slate-300 break-all">{entry.message}</span>
+    </div>
+  );
+}
+
+function PriorityBadge({ priority }: { priority: string }) {
+  const cfg =
+    priority === "high"
+      ? { label: "High", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" }
+      : priority === "medium"
+      ? { label: "Med", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" }
+      : { label: "Low", cls: "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400" };
+  return (
+    <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cfg.cls}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function ContactRow({ lead }: { lead: Lead }) {
+  return (
+    <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+      {lead.email && (
+        <span className="flex items-center gap-1">
+          <Mail className="h-3 w-3 text-blue-400" />
+          {lead.email}
+        </span>
+      )}
+      {lead.phone && (
+        <span className="flex items-center gap-1">
+          <Phone className="h-3 w-3 text-emerald-400" />
+          {lead.phone}
+        </span>
+      )}
+      {lead.instagram && (
+        <span className="flex items-center gap-1">
+          <Instagram className="h-3 w-3 text-pink-400" />
+          {lead.instagram.replace("https://instagram.com/", "@").replace("https://www.instagram.com/", "@")}
+        </span>
+      )}
+      {lead.website && !lead.email && !lead.phone && (
+        <span className="flex items-center gap-1">
+          <Globe className="h-3 w-3 text-slate-400" />
+          {lead.website.replace(/^https?:\/\/(www\.)?/, "").slice(0, 30)}
+        </span>
+      )}
+      {!lead.email && !lead.phone && !lead.instagram && !lead.website && (
+        <span className="text-slate-300 dark:text-slate-600">No contact found</span>
+      )}
+    </div>
+  );
+}
+
+function LeadCard({ lead }: { lead: Lead }) {
+  let signals: string[] = [];
+  try {
+    const parsed = JSON.parse(lead.signals || "[]");
+    signals = parsed.slice(0, 3).map((s: { label?: string; type?: string }) => s.label || s.type || String(s));
+  } catch {
+    signals = [];
+  }
+
+  return (
+    <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <PriorityBadge priority={lead.priority} />
+          <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+            {lead.name}
+          </span>
+        </div>
+        <span className="flex-shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:bg-white/10 dark:text-slate-300">
+          {lead.targetType.replace(/_/g, " ")}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 mb-3">
+        <MapPin className="h-3 w-3" />
+        {lead.city}
+      </div>
+
+      <ContactRow lead={lead} />
+
+      {signals.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {signals.map((s, i) => (
+            <span
+              key={i}
+              className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/20 dark:text-blue-400"
+            >
+              {s}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {lead.angle && (
+        <p className="mt-3 text-xs italic text-slate-500 dark:text-slate-400 line-clamp-2">
+          {lead.angle}
+        </p>
+      )}
+
+      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-white/5">
+        {lead.nextAction && (
+          <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+            → {lead.nextAction}
+          </span>
+        )}
+        <a
+          href={lead.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="ml-auto flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+        >
+          Source <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function SearchPage() {
   const [loading, setLoading] = useState(false);
-  const [progressLog, setProgressLog] = useState<string[]>([]);
-  const [results, setResults] = useState<DbProspect[] | null>(null);
-  const [stats, setStats] = useState<{ contactsFound: number; pagesAnalyzed: number } | null>(null);
+  const [stage, setStage] = useState<Stage>("idle");
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [stats, setStats] = useState<Stats>({
+    queriesRun: 0,
+    urlsFound: 0,
+    pagesAnalyzed: 0,
+    leadsFound: 0,
+    leadsSaved: 0,
+    duplicatesSkipped: 0,
+    errors: 0,
+  });
+  const [leads, setLeads] = useState<Lead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scrapeRunId, setScrapeRunId] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const logIdRef = useRef(0);
 
   const [form, setForm] = useState({
-    city: "",
+    targetDescription: "",
+    location: "",
     country: "France",
-    targetType: "all",
+    industry: "",
     keywords: "",
-    maxResults: 15,
+    negativeKeywords: "",
+    maxResults: 20,
+    maxPagesPerSite: 3,
   });
+
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  const addLog = (level: LogEntry["level"], message: string) => {
+    setLogs((prev) => [...prev, { id: logIdRef.current++, level, message }]);
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.city.trim()) return;
+    if (!form.targetDescription.trim() || !form.location.trim()) return;
 
     setLoading(true);
-    setResults(null);
-    setProgressLog([]);
-    setStats(null);
+    setStage("planning");
+    setLogs([]);
+    setStats({ queriesRun: 0, urlsFound: 0, pagesAnalyzed: 0, leadsFound: 0, leadsSaved: 0, duplicatesSkipped: 0, errors: 0 });
+    setLeads(null);
     setError(null);
+    setScrapeRunId(null);
+    logIdRef.current = 0;
 
     abortRef.current = new AbortController();
 
     try {
-      const response = await fetch("/api/search", {
+      const response = await fetch("/api/scraper/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          targetDescription: form.targetDescription,
+          location: form.location,
+          country: form.country,
+          industry: form.industry || undefined,
+          keywords: form.keywords || undefined,
+          negativeKeywords: form.negativeKeywords || undefined,
+          maxResults: form.maxResults,
+          maxPagesPerSite: form.maxPagesPerSite,
+        }),
         signal: abortRef.current.signal,
       });
 
       if (!response.ok || !response.body) {
-        throw new Error("Search request failed");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error((errData as { error?: string }).error || "Request failed");
       }
 
       const reader = response.body.getReader();
@@ -148,80 +413,106 @@ export default function SearchPage() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
-            const event: ProgressEvent = JSON.parse(line.slice(6));
+            const event = JSON.parse(line.slice(6));
 
-            if (event.type === "progress" && event.message) {
-              setProgressLog((prev) => [...prev.slice(-4), event.message!]);
+            if (event.type === "log") {
+              addLog(event.level, event.message);
+            }
+
+            if (event.type === "progress") {
+              if (event.stage) setStage(event.stage as Stage);
+              if (event.stats) setStats(event.stats);
             }
 
             if (event.type === "complete") {
-              setStats({
-                contactsFound: event.contactsFound || 0,
-                pagesAnalyzed: event.pagesAnalyzed || 0,
-              });
-              // Fetch the newly saved prospects
-              const res = await fetch(
-                `/api/prospects?city=${encodeURIComponent(form.city)}`
-              );
-              const data = await res.json();
-              setResults(data.prospects || []);
+              setStage("done");
+              if (event.stats) setStats(event.stats);
+              if (event.scrapeRunId) {
+                setScrapeRunId(event.scrapeRunId);
+                // Fetch the leads from this run
+                const res = await fetch(`/api/scraper/runs/${event.scrapeRunId}`);
+                if (res.ok) {
+                  const data = await res.json();
+                  setLeads(data.run?.prospects || []);
+                }
+              }
             }
 
             if (event.type === "error") {
-              setError(event.message || "Search failed");
+              setError(event.message || "Unknown error");
+              setStage("idle");
             }
           } catch {
-            // Skip malformed events
+            // Skip malformed lines
           }
         }
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
-        setError("Connection failed. Make sure the app is running properly.");
+        setError((err as Error).message || "Connection failed.");
+        setStage("idle");
       }
     } finally {
       setLoading(false);
-      abortRef.current = null;
+      if (stage !== "done") setStage("idle");
     }
   };
 
   const handleStop = () => {
     abortRef.current?.abort();
     setLoading(false);
+    setStage("idle");
   };
+
+  const isRunning = loading;
+  const isDone = stage === "done" && !loading;
 
   return (
     <AppShell
-      title="Find Real Contacts"
-      subtitle="Search public sources for real Airbnb hosts, concierges, and property managers."
+      title="Scraper"
+      subtitle="Describe your targets in natural language. The scraper finds, scores, and saves real leads."
     >
-      <div className="flex flex-col gap-8">
-        {/* Search Form */}
+      <div className="flex flex-col gap-6">
+        {/* ── Form ── */}
         <form
           onSubmit={handleSearch}
           className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#111]"
         >
-          <div className="p-6 sm:p-8">
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {/* City */}
-              <div className="space-y-2 sm:col-span-2">
+          <div className="p-6 sm:p-8 space-y-5">
+            {/* Target description */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Who are you looking for? *
+              </label>
+              <textarea
+                placeholder="e.g. Airbnb concierge companies and property managers in Biarritz who manage short-term rentals..."
+                required
+                rows={3}
+                value={form.targetDescription}
+                onChange={(e) => setForm({ ...form, targetDescription: e.target.value })}
+                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 py-3 px-4 text-sm font-medium outline-none transition focus:border-blue-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:focus:border-blue-500 dark:focus:bg-white/[0.08] dark:text-white"
+              />
+            </div>
+
+            {/* Location + Country + Industry */}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  City *
+                  City / Region *
                 </label>
                 <div className="relative">
                   <MapPin className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="e.g. Biarritz, Annecy, Lyon..."
+                    placeholder="Biarritz, Annecy..."
                     required
-                    value={form.city}
-                    onChange={(e) => setForm({ ...form, city: e.target.value })}
+                    value={form.location}
+                    onChange={(e) => setForm({ ...form, location: e.target.value })}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium outline-none transition focus:border-slate-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:bg-white/[0.08]"
                   />
                 </div>
               </div>
 
-              {/* Country */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   Country
@@ -229,79 +520,110 @@ export default function SearchPage() {
                 <select
                   value={form.country}
                   onChange={(e) => setForm({ ...form, country: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-3 text-sm font-medium outline-none transition focus:border-slate-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-3 text-sm font-medium outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
                 >
                   {COUNTRIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
+                    <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </div>
 
-              {/* Target Type */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Target Type
-                </label>
-                <div className="relative">
-                  <Target className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <select
-                    value={form.targetType}
-                    onChange={(e) => setForm({ ...form, targetType: e.target.value })}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium outline-none transition focus:border-slate-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
-                  >
-                    {TARGET_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Keywords */}
-              <div className="space-y-2 sm:col-span-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Optional Keywords
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. villa, superhost, agency..."
-                  value={form.keywords}
-                  onChange={(e) => setForm({ ...form, keywords: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-4 text-sm font-medium outline-none transition focus:border-slate-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:bg-white/[0.08]"
-                />
-              </div>
-
-              {/* Max Results */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Max Results
+                  Industry
                 </label>
                 <select
-                  value={form.maxResults}
-                  onChange={(e) =>
-                    setForm({ ...form, maxResults: Number(e.target.value) })
-                  }
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-3 text-sm font-medium outline-none transition focus:border-slate-400 focus:bg-white dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+                  value={form.industry}
+                  onChange={(e) => setForm({ ...form, industry: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-3 text-sm font-medium outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
                 >
-                  <option value={10}>10</option>
-                  <option value={15}>15</option>
-                  <option value={20}>20</option>
-                  <option value={30}>30</option>
+                  {INDUSTRIES.map((ind) => (
+                    <option key={ind.value} value={ind.value}>{ind.label}</option>
+                  ))}
                 </select>
               </div>
             </div>
+
+            {/* Advanced toggle */}
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              Advanced options
+            </button>
+
+            {showAdvanced && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 pt-1">
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Extra keywords
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="villa, superhost, luxury..."
+                    value={form.keywords}
+                    onChange={(e) => setForm({ ...form, keywords: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-4 text-sm outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+                  />
+                </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Negative keywords
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="forum, reddit, facebook..."
+                    value={form.negativeKeywords}
+                    onChange={(e) => setForm({ ...form, negativeKeywords: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-4 text-sm outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Max leads
+                  </label>
+                  <select
+                    value={form.maxResults}
+                    onChange={(e) => setForm({ ...form, maxResults: Number(e.target.value) })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-3 text-sm outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-white/5"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={30}>30</option>
+                    <option value={50}>50</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Pages / site
+                  </label>
+                  <select
+                    value={form.maxPagesPerSite}
+                    onChange={(e) => setForm({ ...form, maxPagesPerSite: Number(e.target.value) })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 px-3 text-sm outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-white/5"
+                  >
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={5}>5</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Footer Bar */}
+          {/* Footer */}
           <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-6 py-4 dark:border-white/5 dark:bg-white/[0.02]">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Searches public websites, business directories, and web results. No fake data.
+            <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+              Searches public web sources. No scraped PII databases.
             </p>
-            <div className="flex items-center gap-3">
-              {loading && (
+            <div className="flex items-center gap-3 ml-auto">
+              {isRunning && (
                 <button
                   type="button"
                   onClick={handleStop}
@@ -312,174 +634,167 @@ export default function SearchPage() {
               )}
               <button
                 type="submit"
-                disabled={!form.city.trim() || loading}
+                disabled={!form.targetDescription.trim() || !form.location.trim() || isRunning}
                 className="flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
               >
-                {loading ? (
+                {isRunning ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Search className="h-4 w-4" />
                 )}
-                Find real contacts
+                {isRunning ? "Running…" : "Find leads"}
               </button>
             </div>
           </div>
         </form>
 
-        {/* Loading / Progress */}
-        {loading && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm dark:border-white/10 dark:bg-[#111]">
-            <div className="flex items-center gap-4 mb-5">
-              <div className="relative h-10 w-10 flex-shrink-0">
-                <div className="absolute inset-0 rounded-full border-2 border-slate-100 dark:border-white/10" />
-                <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-slate-800 animate-spin dark:border-t-white" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Searching public sources...
+        {/* ── Live Progress (shown while running or just done) ── */}
+        {(isRunning || isDone) && (
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#111] overflow-hidden">
+            {/* Stage bar */}
+            {isRunning && stage !== "idle" && stage !== "done" && (
+              <div className="px-6 pt-5 pb-2">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Stage
+                  </span>
+                  <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                    {STAGE_LABELS[stage]}…
+                  </span>
                 </div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  This can take 30–60 seconds. Only real contacts will be saved.
-                </div>
+                <StageBar stage={stage} />
               </div>
+            )}
+
+            {/* Stats grid */}
+            <div className="grid grid-cols-2 gap-3 p-6 sm:grid-cols-4">
+              <StatCard label="Queries run" value={stats.queriesRun} icon={Search} />
+              <StatCard label="URLs found" value={stats.urlsFound} icon={Globe} />
+              <StatCard label="Pages analyzed" value={stats.pagesAnalyzed} icon={Activity} />
+              <StatCard label="Leads saved" value={stats.leadsSaved} icon={TrendingUp} />
             </div>
-            <div className="space-y-1">
-              {progressLog.map((msg, i) => (
+
+            {/* Live log */}
+            {logs.length > 0 && (
+              <div className="border-t border-slate-100 dark:border-white/5">
+                <div className="flex items-center justify-between px-6 py-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Live log
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <Zap className="h-3 w-3" />
+                    {logs.length} entries
+                  </span>
+                </div>
                 <div
-                  key={i}
-                  className={`flex items-start gap-2 text-xs ${
-                    i === progressLog.length - 1
-                      ? "text-slate-700 dark:text-slate-300"
-                      : "text-slate-400 dark:text-slate-500"
-                  }`}
+                  ref={logRef}
+                  className="h-48 overflow-y-auto px-6 pb-4 font-mono space-y-0.5"
                 >
-                  <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-current opacity-60" />
-                  {msg}
+                  {logs.map((entry) => (
+                    <LogLine key={entry.id} entry={entry} />
+                  ))}
+                  {isRunning && (
+                    <div className="flex items-center gap-2 py-0.5">
+                      <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+                      <span className="text-xs text-blue-400">Running…</span>
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Error */}
+        {/* ── Error ── */}
         {error && (
           <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 dark:border-red-900/30 dark:bg-red-950/20">
             <AlertCircle className="h-5 w-5 flex-shrink-0 text-red-500 mt-0.5" />
             <div>
-              <div className="text-sm font-semibold text-red-700 dark:text-red-400">
-                Search error
-              </div>
+              <div className="text-sm font-semibold text-red-700 dark:text-red-400">Error</div>
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>
             </div>
           </div>
         )}
 
-        {/* Results */}
-        {!loading && results !== null && (
+        {/* ── Results ── */}
+        {isDone && leads !== null && (
           <div className="space-y-5">
-            {/* Summary */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  {stats && stats.contactsFound > 0 ? (
-                    <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                  ) : (
-                    <AlertCircle className="h-5 w-5 text-amber-500" />
-                  )}
-                  <span className="text-base font-semibold text-slate-900 dark:text-white">
-                    {results.length === 0
-                      ? "No real contacts found for this search."
-                      : `${results.length} real contact${results.length > 1 ? "s" : ""} found`}
-                  </span>
-                </div>
-                {stats && (
-                  <span className="text-sm text-slate-500 dark:text-slate-400">
-                    ({stats.pagesAnalyzed} pages analyzed)
+                {leads.length > 0 ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-amber-400" />
+                )}
+                <span className="text-base font-semibold text-slate-900 dark:text-white">
+                  {leads.length === 0
+                    ? "No leads saved — try different keywords or broader location."
+                    : `${leads.length} lead${leads.length > 1 ? "s" : ""} saved`}
+                </span>
+                {stats.duplicatesSkipped > 0 && (
+                  <span className="text-sm text-slate-400">
+                    ({stats.duplicatesSkipped} duplicates merged)
                   </span>
                 )}
               </div>
-              {results.length > 0 && (
+              {leads.length > 0 && scrapeRunId && (
                 <Link
-                  href="/contacts"
-                  className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  href={`/history/${scrapeRunId}`}
+                  className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
                 >
-                  View all contacts
+                  Run details
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               )}
             </div>
 
-            {results.length === 0 && !loading && stats !== null && (
+            {leads.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 p-12 text-center dark:border-white/10">
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  No real contacts found for this search. Try a different city or broader keywords.
+                  No real leads found. Try a broader description or different city.
                 </p>
                 <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-                  Tip: Adding a SerpAPI key in .env improves search results significantly.
+                  Tip: Add a SERPAPI_API_KEY or BRAVE_SEARCH_API_KEY in .env for much better search results.
                 </p>
               </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {leads.map((lead) => (
+                  <LeadCard key={lead.id} lead={lead} />
+                ))}
+              </div>
             )}
-
-            {/* Contact Cards */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {results.map((prospect) => (
-                <Link
-                  key={prospect.id}
-                  href={`/contacts/${prospect.id}`}
-                  className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-sm dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20"
-                >
-                  <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <PriorityDot priority={prospect.priority} />
-                      <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                        {prospect.name}
-                      </span>
-                    </div>
-                    <span className="flex-shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:bg-white/10 dark:text-slate-300">
-                      {prospect.targetType.replace("_", " ")}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                    {prospect.city}
-                  </p>
-
-                  <div className="mt-auto flex items-center justify-between">
-                    <ContactBadges prospect={prospect} />
-                    <ArrowRight className="h-4 w-4 text-slate-300 transition group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-400" />
-                  </div>
-                </Link>
-              ))}
-            </div>
           </div>
         )}
 
-        {/* Source info banner */}
-        {!loading && results === null && (
+        {/* ── Intro banner (no run yet) ── */}
+        {!isRunning && stage === "idle" && leads === null && !error && (
           <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-6 dark:border-white/5 dark:bg-white/[0.02]">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
-              What Prospect searches
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">
+              How it works
             </h3>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-3">
               {[
                 {
-                  icon: Globe,
-                  label: "Public websites",
-                  desc: "Business sites, concierge companies, property managers",
-                },
-                {
                   icon: Search,
-                  label: "Web search",
-                  desc: "Google/DuckDuckGo results for Airbnb + city queries",
+                  label: "1. Searches the web",
+                  desc: "Runs targeted queries on DuckDuckGo, SerpAPI, or Brave for your exact target.",
                 },
                 {
-                  icon: ExternalLink,
-                  label: "Social links",
-                  desc: "Instagram and Facebook pages found in public results",
+                  icon: Globe,
+                  label: "2. Crawls websites",
+                  desc: "Visits each result, discovers contact pages, extracts emails, phones & social links.",
+                },
+                {
+                  icon: TrendingUp,
+                  label: "3. Scores & saves",
+                  desc: "Each lead gets a priority + confidence score with explainable signals before saving.",
                 },
               ].map((s) => (
                 <div key={s.label} className="flex items-start gap-3">
-                  <s.icon className="h-4 w-4 flex-shrink-0 text-slate-400 mt-0.5" />
+                  <div className="rounded-lg bg-slate-200 p-2 dark:bg-white/10">
+                    <s.icon className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                  </div>
                   <div>
                     <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                       {s.label}

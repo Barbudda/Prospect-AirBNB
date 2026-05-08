@@ -3,8 +3,7 @@ generator client {
 }
 
 datasource db {
-  // Switch to "postgresql" when using Supabase (update DATABASE_URL in .env too)
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model Prospect {
@@ -13,7 +12,9 @@ model Prospect {
   city             String
   country          String         @default("France")
   targetType       String         @map("target_type")
+  industry         String?
   propertyType     String?        @map("property_type")
+  address          String?
   description      String?
   source           String
   sourceUrl        String         @map("source_url")
@@ -23,17 +24,29 @@ model Prospect {
   instagram        String?
   facebook         String?
   linkedin         String?
+  tiktok           String?
+  twitter          String?
   priority         String         @default("medium")
   status           String         @default("new")
   confidence       String         @default("medium")
   interestLevel    String?        @map("interest_level")
   willingToPay     Boolean        @default(false) @map("willing_to_pay")
   notes            String?
+  signals          String?        // JSON array of signal objects
+  technologyStack  String?        @map("technology_stack") // JSON array
+  angle            String?
+  nextAction       String?        @map("next_action")
+  googleRating     Float?         @map("google_rating")
+  reviewCount      Int?           @map("review_count")
+  placeId          String?        @map("place_id")
+  scrapeRunId      String?        @map("scrape_run_id")
   nextFollowUpDate DateTime?      @map("next_follow_up_date")
+  lastSeenAt       DateTime?      @map("last_seen_at")
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
 
   prospectNotes    ProspectNote[]
+  scrapeRun        ScrapeRun?     @relation(fields: [scrapeRunId], references: [id])
 
   @@map("prospects")
 }
@@ -47,6 +60,45 @@ model ProspectNote {
   prospect Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
 
   @@map("prospect_notes")
+}
+
+model ScrapeRun {
+  id                String    @id @default(uuid())
+  targetDescription String    @map("target_description")
+  location          String    @default("")
+  country           String    @default("France")
+  industry          String?
+  keywords          String?
+  negativeKeywords  String?   @map("negative_keywords")
+  sourcesUsed       String    @map("sources_used")
+  maxResults        Int       @default(50) @map("max_results")
+  maxPagesPerSite   Int       @default(3) @map("max_pages_per_site")
+  status            String    @default("running")
+  startedAt         DateTime  @default(now()) @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  pagesAnalyzed     Int       @default(0) @map("pages_analyzed")
+  leadsFound        Int       @default(0) @map("leads_found")
+  leadsSaved        Int       @default(0) @map("leads_saved")
+  errors            String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  logs      ScrapeLog[]
+  prospects Prospect[]
+
+  @@map("scrape_runs")
+}
+
+model ScrapeLog {
+  id          String   @id @default(uuid())
+  scrapeRunId String   @map("scrape_run_id")
+  level       String
+  message     String
+  metadata    String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  scrapeRun ScrapeRun @relation(fields: [scrapeRunId], references: [id], onDelete: Cascade)
+
+  @@map("scrape_logs")
 }
 
 model SearchRun {
