@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.local
+
+# SQLite database files (use Supabase in production)
+*.db
+*.db-journal
+
+/lib/generated/prisma
+prisma/migrations

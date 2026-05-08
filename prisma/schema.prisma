@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Switch to "postgresql" when using Supabase (update DATABASE_URL in .env too)
+  provider = "sqlite"
+}
+
+model Prospect {
+  id               String         @id @default(uuid())
+  name             String
+  city             String
+  country          String         @default("France")
+  targetType       String         @map("target_type")
+  propertyType     String?        @map("property_type")
+  description      String?
+  source           String
+  sourceUrl        String         @map("source_url")
+  website          String?
+  email            String?
+  phone            String?
+  instagram        String?
+  facebook         String?
+  linkedin         String?
+  priority         String         @default("medium")
+  status           String         @default("new")
+  confidence       String         @default("medium")
+  interestLevel    String?        @map("interest_level")
+  willingToPay     Boolean        @default(false) @map("willing_to_pay")
+  notes            String?
+  nextFollowUpDate DateTime?      @map("next_follow_up_date")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  prospectNotes    ProspectNote[]
+
+  @@map("prospects")
+}
+
+model ProspectNote {
+  id         String   @id @default(uuid())
+  prospectId String   @map("prospect_id")
+  content    String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  prospect Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@map("prospect_notes")
+}
+
+model SearchRun {
+  id            String   @id @default(uuid())
+  query         String
+  city          String
+  country       String   @default("France")
+  targetType    String   @map("target_type")
+  sourcesUsed   String   @map("sources_used")
+  resultsFound  Int      @default(0) @map("results_found")
+  contactsSaved Int      @default(0) @map("contacts_saved")
+  errors        String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("search_runs")
+}

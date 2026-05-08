@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
+      "Bash(npx next *)",
+      "Bash(node -e \"const {PrismaClient} = require\\('@prisma/client'\\); const p = new PrismaClient\\(\\); console.log\\('OK'\\)\")",
+      "Bash(npm info *)",
+      "Bash(npm install *)",
+      "Bash(sqlite3 prisma/dev.db \".tables\")",
+      "Bash(cat prisma/prisma.config.ts)",
+      "Bash(cat prisma.config.ts)",
+      "Bash(curl -s http://localhost:3001/api/settings/status)",
+      "Bash(curl -v http://localhost:3001/api/settings/status)",
+      "Bash(node -e ' *)",
+      "Bash(node --input-type=module)",
+      "Bash(ls *.db)",
+      "Bash(ls prisma/*.db)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(curl -s http://localhost:3002/api/settings/status)",
+      "Bash(curl -s http://localhost:3002/api/prospects)",
+      "Bash(curl -s http://localhost:3002/api/early-adopters)",
+      "Bash(curl -s -X POST http://localhost:3002/api/search -H 'Content-Type: application/json' -d '{\"city\":\"Lyon\",\"country\":\"France\",\"targetType\":\"concierge\",\"maxResults\":3}' --max-time 30)",
+      "Bash(python -m json.tool)",
+      "Bash(npm uninstall *)",
+      "Bash(curl -s http://localhost:3002 -o /dev/null -w \"%{http_code}\")"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 4%;
+    --foreground: 210 40% 98%;
+    --card: 222 40% 7%;
+    --card-foreground: 210 40% 98%;
+    --primary: 167 84% 56%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 225 24% 12%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 224 22% 13%;
+    --muted-foreground: 217 14% 64%;
+    --accent: 252 85% 67%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 225 18% 18%;
+    --input: 225 18% 18%;
+    --ring: 167 84% 56%;
+    --radius: 1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-foreground antialiased;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(45, 212, 191, 0.16), transparent 32rem),
+      radial-gradient(circle at 80% 10%, rgba(124, 58, 237, 0.2), transparent 34rem),
+      linear-gradient(180deg, #050814 0%, #080b14 45%, #05060a 100%);
+  }
+
+  ::selection {
+    background: rgba(45, 212, 191, 0.35);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply border border-white/10 bg-white/[0.045] shadow-panel backdrop-blur-xl;
+  }
+
+  .premium-gradient {
+    background: linear-gradient(135deg, rgba(45, 212, 191, 0.95), rgba(129, 140, 248, 0.95));
+  }
+
+  .subtle-grid {
+    background-image: linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
